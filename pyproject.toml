@@ -17,6 +17,9 @@ dependencies = [
     "livekit-plugins-silero>=0.7.0",
     "livekit-plugins-noise-cancellation~=0.2",
     "python-dotenv>=1.0.0",
+    "pydantic>=2.12.5",
+    "pycompile>=0.2.3",
+    "pydantic-settings>=2.13.1",
 ]
 
 [project.optional-dependencies]

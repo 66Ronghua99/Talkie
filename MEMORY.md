@@ -18,7 +18,11 @@
 - **解决方案**: Tuned the `silero.VAD.load()` parameters: increased `min_speech_duration` to 0.2s and `min_silence_duration` to 1.2s to block 90% of non-speech triggers offline without LLM token waste.
 - **预防措施**: Always tune VAD parameters before considering LLM-based turn detection or heavy filtering mechanisms.
 
-### [2026-02-23] Oversensitive VAD and STT Hallucinations
+### [2026-02-23] Deepgram Built-in VAD vs Local STT
+- **问题描述**: The officially supported Deepgram STT in `realtime_agent` filters noise well and segments user input correctly without explicit silence detection (turn detector), while local STT (Sherpa-ONNX) continuously listens and misinterprets noise without a strict turn detector.
+- **根本原因**: Deepgram's streaming API fundamentally includes server-side VAD, noise reduction, and `endpointing=True` features. It natively sends an `Endpoint` message when a user finishes speaking. LiveKit's Deepgram plugin listens to this and emits `SpeechEvent.END_OF_SPEECH`, bypassing the need for aggressive local VAD. Local STT simply transcribes whatever audio chunks are passed to it, requiring a local Silero VAD to cleanly gate the audio and manually establish `END_OF_SPEECH`.
+- **解决方案**: When using local STT models, either heavily tune the local VAD (`min_silence_duration`) to manually endpoint the audio, or use an LLM-based TurnDetector (`SmartTurnVAD`) to accurately reject noise. When using Deepgram, the local VAD parameter can be bypassed or set to be very lenient to save bandwidth.
+- **预防措施**: Recognize that "STT" in LiveKit refers to the plugin's capability to emit endpointing events. Cloud STTs usually do this out-of-the-box, but local pure-transcription models do not.### [2026-02-23] Oversensitive VAD and STT Hallucinations
 - **问题描述**: The agent was frequently triggering on background noise and generating short, nonsense responses (e.g. "没。", "我说。").
 - **根本原因**: The default `silero` VAD parameters ( at 0.05s) were too sensitive. Small background noises triggered VAD, passing short audio frames to the STT, causing it to hallucinate common punctuation and noise fragments.
 - **解决方案**: Tuned the `silero.VAD.load()` parameters: increased `min_speech_duration` to 0.2s and `min_silence_duration` to 1.2s to block 90% of non-speech triggers offline without LLM token waste.

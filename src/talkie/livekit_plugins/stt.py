@@ -13,6 +13,7 @@ from livekit.agents import stt, utils
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
 
 from ..perception.asr import BaseASR, SherpaOnnxASR, create_asr
+from ..perception.vad import BaseVAD, create_vad
 from ..logging_config import setup_logger
 
 logger = setup_logger("realtalk.livekit_plugins.stt")
@@ -27,6 +28,7 @@ class RealTalkSTTPlugin(stt.STT):
     def __init__(
         self,
         asr: BaseASR | None = None,
+        vad: BaseVAD | None = None,
         *,
         sample_rate: int = 16000,
     ):
@@ -34,6 +36,7 @@ class RealTalkSTTPlugin(stt.STT):
 
         Args:
             asr: Optional pre-configured ASR instance. If None, creates default SherpaOnnxASR.
+            vad: Optional pre-configured VAD instance.
             sample_rate: Audio sample rate in Hz. Default is 16000.
         """
         super().__init__(
@@ -46,6 +49,7 @@ class RealTalkSTTPlugin(stt.STT):
             )
         )
         self._asr = asr
+        self._vad = vad
         self._sample_rate = sample_rate
         self._initialized = False
 
@@ -76,6 +80,13 @@ class RealTalkSTTPlugin(stt.STT):
             logger.info("Loading SherpaOnnxASR model...")
             await self._asr.load()
 
+        if self._vad is None:
+            logger.info("Creating default VAD instance...")
+            self._vad = await create_vad()
+        elif hasattr(self._vad, 'load') and getattr(self._vad, '_model', None) is None and getattr(self._vad, '_vad', None) is None:
+            logger.info("Loading VAD model...")
+            await self._vad.load()
+
         self._initialized = True
         logger.info("RealTalkSTTPlugin initialized")
 
@@ -83,6 +94,9 @@ class RealTalkSTTPlugin(stt.STT):
         """Close the ASR and release resources."""
         if self._asr:
             await self._asr.close()
+        if self._vad:
+            await self._vad.close()
+        if self._asr or self._vad:
             self._initialized = False
             logger.info("RealTalkSTTPlugin closed")
 
@@ -232,6 +246,8 @@ class RealTalkRecognizeStream(stt.RecognizeStream):
 
         # Track if we've sent START_OF_SPEECH
         self._speech_started = False
+        self._vad_silence_frames = 0
+        self._max_silence_frames = 15  # ~1.5 seconds of silence before forcibly emitting END_OF_SPEECH (assuming ~100ms buffers)
 
     async def _run(self) -> None:
         """Main processing loop for streaming recognition.
@@ -288,8 +304,40 @@ class RealTalkRecognizeStream(stt.RecognizeStream):
         overlap_bytes = 1600 * 2  # 100ms overlap
         audio_to_process = bytes(self._audio_buffer)
         self._audio_buffer = bytearray(self._audio_buffer[-overlap_bytes:])
+        
+        # Audio check: Convert buffer to numpy array for VAD
+        audio_array = np.frombuffer(audio_to_process, dtype=np.int16).astype(np.float32) / 32768.0
 
         try:
+            # 1. Run local VAD first
+            is_speech_frame = False
+            if self._realtalk_stt._vad:
+                vad_result = await self._realtalk_stt._vad.detect(audio_array)
+                is_speech_frame = vad_result.is_speech
+            else:
+                is_speech_frame = True # Pass everything if no VAD is present
+
+            if not is_speech_frame:
+                if self._speech_started:
+                    self._vad_silence_frames += 1
+                    # If silence exceeds threshold, manually trigger END_OF_SPEECH
+                    if self._vad_silence_frames >= self._max_silence_frames:
+                        self._speech_started = False
+                        self._vad_silence_frames = 0
+                        self._event_ch.send_nowait(
+                            stt.SpeechEvent(
+                                type=stt.SpeechEventType.END_OF_SPEECH,
+                                request_id=self._request_id,
+                                alternatives=[],
+                            )
+                        )
+                # Skip ASR to prevent hallucination on silence/noise
+                return
+
+            # Speech detected: reset silence counter
+            self._vad_silence_frames = 0
+
+            # 2. Run ASR on verified speech
             result = await self._realtalk_stt._asr.recognize(audio_to_process)
 
             if result.text:
@@ -377,17 +425,19 @@ class RealTalkRecognizeStream(stt.RecognizeStream):
 
 async def create_stt_plugin(
     asr: BaseASR | None = None,
+    vad: BaseVAD | None = None,
     sample_rate: int = 16000,
 ) -> RealTalkSTTPlugin:
     """Factory function to create STT plugin.
 
     Args:
         asr: Optional pre-configured ASR instance
+        vad: Optional pre-configured VAD instance
         sample_rate: Audio sample rate
 
     Returns:
         Initialized RealTalkSTTPlugin
     """
-    plugin = RealTalkSTTPlugin(asr=asr, sample_rate=sample_rate)
+    plugin = RealTalkSTTPlugin(asr=asr, vad=vad, sample_rate=sample_rate)
     await plugin.initialize()
     return plugin

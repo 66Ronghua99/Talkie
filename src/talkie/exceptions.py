@@ -4,6 +4,9 @@ class TalkieError(Exception):
 class ASRError(TalkieError):
     pass
 
+class VADError(TalkieError):
+    pass
+
 class TTSError(TalkieError):
     pass
 

@@ -32,11 +32,12 @@ async def my_agent(ctx: agents.JobContext):
     tts_plugin = await create_tts_plugin()
 
     session = AgentSession(
-        stt="deepgram/nova-3:multi",
+        stt=stt_plugin,
+        # stt="deepgram/nova-3:multi",
         llm=llm_plugin,
         tts=tts_plugin,
-        vad=silero.VAD.load(),
-        turn_detection=MultilingualModel(),
+        # vad=silero.VAD.load(),
+        # turn_detection=MultilingualModel(),
     )
 
     await session.start(
