@@ -1,19 +1,11 @@
 from dotenv import load_dotenv
 
-import sys
-import os
-sys.path.insert(0, os.path.abspath("src"))
-
 from livekit import agents, rtc
 from livekit.agents import AgentServer, AgentSession, Agent, room_io
 from livekit.plugins import (
-    silero,
+    openai,
     noise_cancellation,
 )
-
-from talkie.livekit_plugins.stt import create_stt_plugin
-from talkie.livekit_plugins.llm import create_llm_plugin
-from talkie.livekit_plugins.tts import create_tts_plugin
 
 load_dotenv(".env")
 
@@ -25,16 +17,10 @@ server = AgentServer()
 
 @server.rtc_session(agent_name="my-agent")
 async def my_agent(ctx: agents.JobContext):
-    stt_plugin = await create_stt_plugin()
-    llm_plugin = await create_llm_plugin()
-    tts_plugin = await create_tts_plugin()
-
     session = AgentSession(
-        stt=stt_plugin,
-        llm=llm_plugin,
-        tts=tts_plugin,
-        vad=silero.VAD.load(),
-        turn_detection="vad",
+        llm=openai.realtime.RealtimeModel(
+            voice="coral"
+        )
     )
 
     await session.start(
