@@ -10,10 +10,12 @@ from livekit.plugins import (
     silero,
     noise_cancellation,
 )
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from talkie.livekit_plugins.stt import create_stt_plugin
 from talkie.livekit_plugins.llm import create_llm_plugin
 from talkie.livekit_plugins.tts import create_tts_plugin
+from talkie.livekit_plugins.turn_detector import SmartTurnVAD
 
 load_dotenv(".env")
 
@@ -30,11 +32,11 @@ async def my_agent(ctx: agents.JobContext):
     tts_plugin = await create_tts_plugin()
 
     session = AgentSession(
-        stt=stt_plugin,
+        stt="deepgram/nova-3:multi",
         llm=llm_plugin,
         tts=tts_plugin,
         vad=silero.VAD.load(),
-        turn_detection="vad",
+        turn_detection=MultilingualModel(),
     )
 
     await session.start(
